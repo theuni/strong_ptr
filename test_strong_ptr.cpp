@@ -129,6 +129,11 @@ static void test_use_count()
         assert(degraded.decayed());
 }
 
+static void test_wait()
+{
+    //TODO
+}
+
 int main()
 {
     test_construction();

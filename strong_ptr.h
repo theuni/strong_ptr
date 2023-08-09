@@ -6,16 +6,35 @@
 #define BITCOIN_STRONGPTR_H
 
 #include <memory>
+#include <cassert>
+#include <condition_variable>
+#include <mutex>
 
 template <typename T>
 class decay_ptr;
+
+struct wake_type
+{
+    std::condition_variable m_cond{};
+    std::mutex m_mut{};
+};
 
 template <typename T>
 class strong_ptr
 {
     struct shared_deleter {
-        void operator()(T* /* unused */) const {}
-        const std::shared_ptr<void> m_data;
+        void operator()(T* /* unused */)
+        {
+            assert(m_wake);
+            m_data.reset();
+            {
+                // Necessary dummy lock
+                std::lock_guard<std::mutex> lock(m_wake->m_mut);
+            }
+            m_wake->m_cond.notify_all();
+        }
+        std::shared_ptr<void> m_data;
+        std::shared_ptr<wake_type> m_wake;
     };
 
     friend class decay_ptr<T>;
@@ -33,34 +52,34 @@ public:
 
     constexpr strong_ptr() : strong_ptr(nullptr) {}
 
-    constexpr strong_ptr(std::nullptr_t) : m_shared{nullptr} {}
+    constexpr strong_ptr(std::nullptr_t) : m_shared{nullptr}, m_wake{std::make_shared<wake_type>()} {}
 
     template <typename U>
-    explicit strong_ptr(U* ptr) : m_data(ptr)
+    explicit strong_ptr(U* ptr) : m_data(ptr), m_wake{std::make_shared<wake_type>()}
     {
     }
 
     template <typename Deleter>
-    strong_ptr(std::nullptr_t ptr, Deleter deleter) : m_data{ptr, std::move(deleter)}
+    strong_ptr(std::nullptr_t ptr, Deleter deleter) : m_data{ptr, std::move(deleter)}, m_wake{std::make_shared<wake_type>()}
     {
     }
 
     template <typename U, typename Deleter>
-    strong_ptr(U* ptr, Deleter deleter) : m_data{ptr, std::move(deleter)}
+    strong_ptr(U* ptr, Deleter deleter) : m_data{ptr, std::move(deleter)}, m_wake{std::make_shared<wake_type>()}
     {
     }
 
     template <typename U, typename Deleter>
-    strong_ptr(std::unique_ptr<U, Deleter>&& rhs) : m_data{std::move(rhs)}
+    strong_ptr(std::unique_ptr<U, Deleter>&& rhs) : m_data{std::move(rhs)}, m_wake{std::make_shared<wake_type>()}
     {
+        assert(m_wake);
     }
 
     template <typename U>
-    strong_ptr(strong_ptr<U>&& rhs) : m_data{std::move(rhs.m_data)}, m_shared{std::move(rhs.m_shared)}
+    strong_ptr(strong_ptr<U>&& rhs) : m_data{std::move(rhs.m_data)}, m_wake{std::move(rhs.m_wake)}, m_shared{std::move(rhs.m_shared)}
     {
     }
-
-    strong_ptr(strong_ptr&& rhs) noexcept : m_data{std::move(rhs.m_data)}, m_shared{std::move(rhs.m_shared)} {}
+    strong_ptr(strong_ptr&& rhs) noexcept : m_data{std::move(rhs.m_data)}, m_wake{std::move(rhs.m_wake)}, m_shared{std::move(rhs.m_shared)} {}
 
     ~strong_ptr() = default;
 
@@ -70,6 +89,7 @@ public:
     strong_ptr& operator=(strong_ptr&& rhs) noexcept
     {
         m_data = std::move(rhs.m_data);
+        m_wake = std::move(rhs.m_wake);
         m_shared = std::move(rhs.m_shared);
         return *this;
     }
@@ -78,6 +98,7 @@ public:
     strong_ptr& operator=(strong_ptr<U>&& rhs)
     {
         m_data = std::move(rhs.m_data);
+        m_wake = std::move(rhs.m_wake);
         m_shared = std::move(rhs.m_shared);
         return *this;
     }
@@ -93,7 +114,8 @@ public:
     strong_ptr& operator=(std::unique_ptr<U, Deleter>&& rhs)
     {
         m_data = std::move(rhs);
-        m_shared.reset(nullptr, shared_deleter{m_data});
+        m_wake = std::make_shared<wake_type>();
+        m_shared.reset(nullptr, shared_deleter{m_data, m_wake});
         return *this;
     }
 
@@ -101,6 +123,7 @@ public:
     {
         m_data.reset();
         m_shared.reset();
+        m_wake = std::make_shared<wake_type>();
     }
     void reset(std::nullptr_t)
     {
@@ -110,13 +133,15 @@ public:
     void reset(U* ptr)
     {
         m_data.reset(ptr);
-        m_shared.reset(nullptr, shared_deleter{m_data});
+        m_wake = std::make_shared<wake_type>();
+        m_shared.reset(nullptr, shared_deleter{m_data, m_wake});
     }
     template <typename U, typename Deleter>
     void reset(U* ptr, Deleter deleter)
     {
         m_data.reset(ptr, std::move(deleter));
-        m_shared.reset(nullptr, shared_deleter{m_data});
+        m_wake = std::make_shared<wake_type>();
+        m_shared.reset(nullptr, shared_deleter{m_data, m_wake});
     }
     std::shared_ptr<T> get_shared() const
     {
@@ -153,7 +178,8 @@ public:
 
 private:
     std::shared_ptr<T> m_data;
-    std::shared_ptr<void> m_shared{nullptr, shared_deleter{m_data}};
+    std::shared_ptr<wake_type> m_wake;
+    std::shared_ptr<void> m_shared{nullptr, shared_deleter{m_data, m_wake}};
 };
 
 template <typename T>
@@ -162,12 +188,12 @@ class decay_ptr
 public:
     constexpr decay_ptr() = default;
     constexpr decay_ptr(std::nullptr_t) : decay_ptr{} {}
-    decay_ptr(decay_ptr&& rhs) noexcept : m_data{std::move(rhs.m_data)}, m_decaying{std::move(rhs.m_decaying)}
+    decay_ptr(decay_ptr&& rhs) noexcept : m_data{std::move(rhs.m_data)}, m_decaying{std::move(rhs.m_decaying)}, m_wake{std::move(rhs.m_wake)}
     {
     }
 
     template <typename U>
-    decay_ptr(decay_ptr<U>&& rhs) : m_data{std::move(rhs.m_data)}, m_decaying{std::move(rhs.m_decaying)}
+    decay_ptr(decay_ptr<U>&& rhs) : m_data{std::move(rhs.m_data)}, m_decaying{std::move(rhs.m_decaying)}, m_wake{std::move(rhs.m_wake)}
     {
     }
 
@@ -175,8 +201,9 @@ public:
     decay_ptr& operator=(const decay_ptr&) = delete;
 
     template <typename U>
-    decay_ptr(strong_ptr<U>&& ptr) : m_data{std::move(ptr.m_data)}, m_decaying{ptr.m_shared}
+    decay_ptr(strong_ptr<U>&& ptr) : m_data{std::move(ptr.m_data)}, m_decaying{ptr.m_shared}, m_wake{std::move(ptr.m_wake)}
     {
+        assert(m_wake);
         ptr.m_shared.reset();
     }
 
@@ -186,12 +213,14 @@ public:
     decay_ptr& operator=(decay_ptr<U>&& rhs)
     {
         m_data = std::move(rhs.m_data);
+        m_wake = std::move(rhs.m_wake);
         m_decaying = std::move(rhs.m_decaying);
         return *this;
     }
     decay_ptr& operator=(decay_ptr&& rhs) noexcept
     {
         m_data = std::move(rhs.m_data);
+        m_wake = std::move(rhs.m_wake);
         m_decaying = std::move(rhs.m_decaying);
         return *this;
     }
@@ -199,18 +228,29 @@ public:
     decay_ptr& operator=(strong_ptr<U>&& rhs)
     {
         m_data = std::move(rhs.m_data);
+        m_wake = std::move(rhs.m_wake);
         m_decaying = rhs.m_shared;
         rhs.m_shared.reset();
+        rhs.m_wake.reset();
         return *this;
     }
     bool decayed() const
     {
         return m_decaying.expired();
     }
+
+    // TODO: Replace this with std::condition_variable-style wait functions
+    void wait()
+    {
+        assert(m_wake);
+        std::unique_lock<std::mutex> lock(m_wake->m_mut);
+        m_wake->m_cond.wait(lock);
+    }
     void reset()
     {
         m_decaying.reset();
         m_data.reset();
+        m_wake.reset();
     }
     T* operator*()
     {
@@ -244,12 +284,13 @@ public:
 private:
     std::shared_ptr<T> m_data;
     std::weak_ptr<void> m_decaying;
+    std::shared_ptr<wake_type> m_wake;
 };
 
 template <typename T, typename... Args>
 inline strong_ptr<T> make_strong(Args&&... args)
 {
-    return strong_ptr<T>(std::make_shared<T>(std::forward<Args>(args)...));
+    return strong_ptr<T>(std::make_unique<T>(std::forward<Args>(args)...));
 }
 
 
