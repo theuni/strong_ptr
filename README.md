@@ -53,3 +53,8 @@ int main()
     return 0;
 }
 ```
+
+## Implementation details
+- Header-only
+- The implementation is c++11 and may work with some compilers, but c++14 is recommended to avoid [LWG 2315](https://cplusplus.github.io/LWG/issue2315)
+- std pointers are used throughout rather than custom implementations for the sake of simplicity.
