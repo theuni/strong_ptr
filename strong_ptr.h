@@ -162,17 +162,13 @@ class decay_ptr
 public:
     constexpr decay_ptr() = default;
     constexpr decay_ptr(std::nullptr_t) : decay_ptr{} {}
-    decay_ptr(decay_ptr&& rhs) noexcept : m_data{std::move(rhs.m_data)}, m_decaying{rhs.m_decaying}
+    decay_ptr(decay_ptr&& rhs) noexcept : m_data{std::move(rhs.m_data)}, m_decaying{std::move(rhs.m_decaying)}
     {
-        // NOTE: Until c++14, weak_ptr lacked a move ctor
-        rhs.m_decaying.reset();
     }
 
     template <typename U>
-    decay_ptr(decay_ptr<U>&& rhs) : m_data{std::move(rhs.m_data)}, m_decaying{rhs.m_decaying}
+    decay_ptr(decay_ptr<U>&& rhs) : m_data{std::move(rhs.m_data)}, m_decaying{std::move(rhs.m_decaying)}
     {
-        // NOTE: Until c++14, weak_ptr lacked a move ctor
-        rhs.m_decaying.reset();
     }
 
     decay_ptr(const decay_ptr&) = delete;
@@ -181,7 +177,6 @@ public:
     template <typename U>
     decay_ptr(strong_ptr<U>&& ptr) : m_data{std::move(ptr.m_data)}, m_decaying{ptr.m_shared}
     {
-        // NOTE: Until c++14, weak_ptr lacked a ctor which accepts an rvalue shared_ptr.
         ptr.m_shared.reset();
     }
 
@@ -190,24 +185,19 @@ public:
     template <typename U>
     decay_ptr& operator=(decay_ptr<U>&& rhs)
     {
-        // NOTE: Until c++14, weak_ptr lacked a move operator
         m_data = std::move(rhs.m_data);
-        m_decaying = rhs.m_decaying;
-        rhs.m_decaying.reset();
+        m_decaying = std::move(rhs.m_decaying);
         return *this;
     }
     decay_ptr& operator=(decay_ptr&& rhs) noexcept
     {
-        // NOTE: Until c++14, weak_ptr lacked a move operator
         m_data = std::move(rhs.m_data);
-        m_decaying = rhs.m_decaying;
-        rhs.m_decaying.reset();
+        m_decaying = std::move(rhs.m_decaying);
         return *this;
     }
     template <typename U>
     decay_ptr& operator=(strong_ptr<U>&& rhs)
     {
-        // NOTE: Until c++14, weak_ptr lacked a move operator which accepts an rvalue shared_ptr.
         m_data = std::move(rhs.m_data);
         m_decaying = rhs.m_shared;
         rhs.m_shared.reset();
