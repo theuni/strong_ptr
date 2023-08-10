@@ -239,13 +239,53 @@ public:
         return m_decaying.expired();
     }
 
-    // TODO: Replace this with std::condition_variable-style wait functions
     void wait()
     {
         assert(m_wake);
         std::unique_lock<std::mutex> lock(m_wake->m_mut);
         m_wake->m_cond.wait(lock);
     }
+
+    template<class Predicate>
+    void wait(Predicate stop_waiting)
+    {
+        assert(m_wake);
+        std::unique_lock<std::mutex> lock(m_wake->m_mut);
+        m_wake->m_cond.wait(lock, stop_waiting);
+    }
+
+    template<class Rep, class Period, class Predicate>
+    bool wait_for(const std::chrono::duration<Rep, Period>& rel_time, Predicate stop_waiting)
+    {
+        assert(m_wake);
+        std::unique_lock<std::mutex> lock(m_wake->m_mut);
+        return m_wake->m_cond.wait_for(lock, rel_time, stop_waiting);
+    }
+
+    template<class Rep, class Period>
+    std::cv_status wait_for(const std::chrono::duration<Rep, Period>& rel_time)
+    {
+        assert(m_wake);
+        std::unique_lock<std::mutex> lock(m_wake->m_mut);
+        return m_wake->m_cond.wait_for(lock, rel_time);
+    }
+
+    template<class Clock, class Duration>
+    std::cv_status wait_until(const std::chrono::time_point<Clock, Duration>& timeout_time)
+    {
+        assert(m_wake);
+        std::unique_lock<std::mutex> lock(m_wake->m_mut);
+        return m_wake->m_cond.wait_until(lock, timeout_time);
+    }
+
+    template<class Clock, class Duration, class Predicate>
+    bool wait_until(const std::chrono::time_point<Clock, Duration>& timeout_time, Predicate stop_waiting)
+    {
+        assert(m_wake);
+        std::unique_lock<std::mutex> lock(m_wake->m_mut);
+        return m_wake->m_cond.wait_until(lock, timeout_time, stop_waiting);
+    }
+
     void reset()
     {
         m_decaying.reset();
