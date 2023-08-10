@@ -7,7 +7,7 @@ While any such pattern would usually make no sense, it can be made to work with 
 1. Create a `strong_ptr` like any typical smart pointer. It cannot be copied, but it can "loan out" `std::shared_ptr`s using `strong_ptr::get_shared()`.
 2. Use the "loaned" `shared_ptr`s as usual, and use the `strong_ptr` as though it were a `unique_ptr`.
 3. When it's time to coalesce, move the `strong_ptr` into a `decay_ptr`.
-4. Query the status with `decay_ptr::decayed()` or block the current thread until decay with `decay_ptr::wait()`.
+4. Query the status with `decay_ptr::decayed()` or block the current thread until decay with `decay_ptr::wait()`, `decay_ptr::wait_for()`, or `decay_ptr::wait_until()`.
 
 Once moved into a `decay_ptr`, the original `strong_ptr` is reset, and the `decay_ptr` is unable to loan out any new `std::shared_ptr`s. Once the `decay_ptr` has decayed, it behaves just like a `std::unique_ptr`.
 
